@@ -18,15 +18,15 @@ fn syntax_score(input: &str) -> anyhow::Result<SyntaxScore> {
 	let mut total_syntax_error_score = 0;
 	let mut autocomplete_scores = Vec::new();
 
-	let mut queue = Vec::new();
+	let mut stack = Vec::new();
 
 	'lines: for line in input.lines() {
-		queue.clear();
+		stack.clear();
 		for c in line.as_bytes() {
 			match *c {
-				b'{' | b'[' | b'<' | b'(' => queue.push(*c),
+				b'{' | b'[' | b'<' | b'(' => stack.push(*c),
 				c => {
-					let opening_char = match queue.pop() {
+					let opening_char = match stack.pop() {
 						Some(v) => v,
 						None => continue 'lines,
 					};
@@ -46,7 +46,7 @@ fn syntax_score(input: &str) -> anyhow::Result<SyntaxScore> {
 		}
 
 		let mut autocomplete_score = 0;
-		while let Some(c) = queue.pop() {
+		while let Some(c) = stack.pop() {
 			autocomplete_score *= 5;
 			match c {
 				b'(' => autocomplete_score += 1,
