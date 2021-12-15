@@ -1,8 +1,10 @@
 extern crate itertools;
+extern crate nom;
 
+use anyhow::bail;
 use itertools::Itertools;
-use std::collections::HashMap;
-use std::collections::HashSet;
+use std::cmp::{Ordering, Reverse};
+use std::collections::{BinaryHeap, HashMap};
 
 fn main() -> anyhow::Result<()> {
 	let input = std::fs::read_to_string("day_15/input.txt")?;
@@ -16,32 +18,7 @@ fn part_1(input: &str) -> anyhow::Result<i64> {
 		.lines()
 		.map(|line| line.bytes().map(|x| (x - b'0') as i64).collect_vec())
 		.collect_vec();
-	let mut costs = HashMap::<(usize, usize), i64>::new();
-	let mut parents = HashMap::<(usize, usize), (usize, usize)>::new();
-	let mut processed = HashSet::<(usize, usize)>::new();
-
-	parents.insert((0, 1), (0, 0));
-	parents.insert((1, 0), (0, 0));
-
-	costs.insert((0, 1), input[1][0]);
-	costs.insert((1, 0), input[0][1]);
-	let (last_i, last_j) = (input.last().unwrap().len() - 1, input.len() - 1);
-	costs.insert((last_i, last_j), i64::MAX);
-
-	while let Some(node @ (i, j)) = find_lowest_cost_node(&costs, &processed) {
-		let cost = *costs.get(&node).unwrap();
-		let neighbours = deltas((i, j), input[0].len(), input.len());
-		for (ni, nj) in neighbours {
-			let new_cost = cost + input[nj][ni];
-			if *costs.get(&(ni, nj)).unwrap_or(&i64::MAX) > new_cost {
-				costs.insert((ni, nj), new_cost);
-				*parents.entry((ni, nj)).or_default() = node;
-			}
-		}
-		processed.insert(node);
-	}
-
-	Ok(*costs.get(&(last_i, last_j)).unwrap())
+	dijkstra(input)
 }
 
 fn part_2(input: &str) -> anyhow::Result<i64> {
@@ -49,12 +26,12 @@ fn part_2(input: &str) -> anyhow::Result<i64> {
 		.lines()
 		.map(|line| line.bytes().map(|x| (x - b'0') as i64).collect_vec())
 		.collect_vec();
-	let size = input.len();
+	let side_size = input.len();
 
 	for c in 1..5 {
-		for j in 0..size {
-			let mut vec = Vec::with_capacity(size * 5);
-			let next = &input[(c - 1) * size + j];
+		for j in 0..side_size {
+			let mut vec = Vec::with_capacity(side_size * 5);
+			let next = &input[(c - 1) * side_size + j];
 			for val in next {
 				let mut next_val = *val + 1;
 				if next_val > 9 {
@@ -66,10 +43,10 @@ fn part_2(input: &str) -> anyhow::Result<i64> {
 		}
 	}
 
-	for j in 0..(size * 5) {
+	for j in 0..(side_size * 5) {
 		for c in 1..5 {
-			for i in 0..size {
-				let mut next = input[j][(c - 1) * size + i] + 1;
+			for i in 0..side_size {
+				let mut next = input[j][(c - 1) * side_size + i] + 1;
 				if next > 9 {
 					next -= 9;
 				}
@@ -78,34 +55,52 @@ fn part_2(input: &str) -> anyhow::Result<i64> {
 		}
 	}
 
+	dijkstra(input)
+}
+
+fn dijkstra(input: Vec<Vec<i64>>) -> anyhow::Result<i64> {
+	let side_size = input.len();
+
+	let mut priority_queue = BinaryHeap::<Reverse<Cell>>::new();
 	let mut costs = HashMap::<(usize, usize), i64>::new();
-	let mut parents = HashMap::<(usize, usize), (usize, usize)>::new();
-	let mut processed = HashSet::<(usize, usize)>::new();
 
-	parents.insert((0, 1), (0, 0));
-	parents.insert((1, 0), (0, 0));
+	priority_queue.push(Reverse(Cell { p: (0, 0), cost: 0 }));
 
-	costs.insert((0, 1), input[1][0]);
-	costs.insert((1, 0), input[0][1]);
-	let (last_i, last_j) = (input.last().unwrap().len() - 1, input.len() - 1);
-	costs.insert((last_i, last_j), i64::MAX);
+	while let Some(Reverse(Cell { p, cost })) = priority_queue.pop() {
+		if p == (side_size - 1, side_size - 1) {
+			return Ok(cost);
+		}
 
-	while let Some(node @ (i, j)) = find_lowest_cost_node(&costs, &processed) {
-		let cost = *costs.get(&node).unwrap();
-		let neighbours = deltas((i, j), input[0].len(), input.len());
+		if cost > *costs.get(&p).unwrap_or(&i64::MAX) {
+			continue;
+		}
+
+		let neighbours = deltas(p, side_size, side_size);
 		for (ni, nj) in neighbours {
 			let new_cost = cost + input[nj][ni];
 			if *costs.get(&(ni, nj)).unwrap_or(&i64::MAX) > new_cost {
+				priority_queue.push(Reverse(Cell {
+					p: (ni, nj),
+					cost: new_cost,
+				}));
 				costs.insert((ni, nj), new_cost);
-				*parents.entry((ni, nj)).or_default() = node;
 			}
 		}
-		processed.insert(node);
-
-		// println!("Processed {}", processed.len());
 	}
 
-	Ok(*costs.get(&(last_i, last_j)).unwrap())
+	bail!("Exit node not found")
+}
+
+#[derive(Eq, PartialEq, PartialOrd)]
+struct Cell {
+	p: (usize, usize),
+	cost: i64,
+}
+
+impl Ord for Cell {
+	fn cmp(&self, other: &Self) -> Ordering {
+		self.cost.cmp(&other.cost)
+	}
 }
 
 fn deltas(
@@ -126,21 +121,6 @@ fn deltas(
 	};
 	let left = if i == 0 { None } else { Some((i - 1, j)) };
 	[up, right, down, left].into_iter().filter_map(|x| x)
-}
-
-fn find_lowest_cost_node(
-	costs: &HashMap<(usize, usize), i64>,
-	processed: &HashSet<(usize, usize)>,
-) -> Option<(usize, usize)> {
-	let mut lowest_cost = i64::MAX;
-	let mut lowest_cost_node = None;
-	for (node, val) in costs {
-		if *val < lowest_cost && !processed.contains(node) {
-			lowest_cost = *val;
-			lowest_cost_node = Some(*node);
-		}
-	}
-	lowest_cost_node
 }
 
 #[cfg(test)]
